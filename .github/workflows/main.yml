@@ -11,6 +11,8 @@ jobs:
   publish:
     name: build, pack & publish
     runs-on: ubuntu-latest
+    permissions:
+      packages: write
     environment:
       name: main
     steps:
