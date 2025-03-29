@@ -39,4 +39,4 @@ jobs:
       #   run: dotnet nuget push ./out/*.nupkg --source https://api.nuget.org/v3/index.json --api-key ${{secrets.NUGET_ACCESS_TOKEN}} --skip-duplicate
         
       - name: publish-to-github
-        run: dotnet nuget push ./out/*.nupkg --source https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json --api-key ${{secrets._GITHUB_TOKEN}} --skip-duplicate
+        run: dotnet nuget push ./out/*.nupkg --source https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json --api-key ${{secrets.GITHUB_TOKEN}} --skip-duplicate
