@@ -29,3 +29,4 @@ app.MapPost("loki/api/v1/push", async (HttpContext context, ILogger<Program> log
 }).AllowAnonymous();
 
 app.Run();
+
