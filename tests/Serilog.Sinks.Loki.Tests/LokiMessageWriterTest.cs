@@ -379,8 +379,8 @@ namespace Serilog.Sinks.Loki.Tests
             var metadata = document.RootElement.GetProperty("streams")[0].GetProperty("values")[0][2];
 
             Assert.Equal("42", metadata.GetProperty("u").GetString());
-            Assert.Equal("1", metadata.GetProperty("d__<null>").GetString());
-            Assert.Equal("x", metadata.GetProperty($"d__{2.5}").GetString());
+            Assert.Equal("1", metadata.GetProperty("d___null_").GetString());
+            Assert.Equal("x", metadata.GetProperty($"d__{2.5}".Replace('.', '_').Replace(',', '_')).GetString());
         }
 
         [Fact]
@@ -411,6 +411,33 @@ namespace Serilog.Sinks.Loki.Tests
                 Assert.Equal("true", metadata.GetProperty("o__c").GetString());
                 Assert.Equal(3, metadata.EnumerateObject().Count());
             }
+        }
+
+        [Fact]
+        public void Should_sanitize_metadata_names_like_loki()
+        {
+            var logWriter = Create();
+
+            var messageTemplate = _messageTemplateParser.Parse("{0} {@s}");
+
+            var structure = new StructureValue([
+                new LogEventProperty("Prénom", new ScalarValue("Zoé")),
+                new LogEventProperty("a-b.c😀", new ScalarValue(1)),
+            ]);
+
+            var log = new LogEvent(_date, LogEventLevel.Information, null, messageTemplate, [
+                new LogEventProperty("0", new ScalarValue("first")),
+                new LogEventProperty("s", structure),
+            ]);
+
+            logWriter.Write(_jsonWriter, [log]);
+            _jsonWriter.Flush();
+
+            using var document = JsonDocument.Parse(_bufferWriter.WrittenMemory);
+            var metadata = document.RootElement.GetProperty("streams")[0].GetProperty("values")[0][2];
+
+            Assert.Equal(["key_0", "s__Pr_nom", "s__a_b_c_"], metadata.EnumerateObject().Select(x => x.Name));
+            Assert.Equal("Zoé", metadata.GetProperty("s__Pr_nom").GetString());
         }
 
         public void Dispose()

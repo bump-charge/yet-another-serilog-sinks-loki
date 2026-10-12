@@ -9,11 +9,14 @@ namespace Serilog.Sinks.Loki.Internal
     /// <summary>
     /// Reusable buffer for building flattened structured metadata names (e.g. <c>Prop__Child__0</c>)
     /// without allocating an intermediate string per nesting level.
+    /// Names are sanitized to the Prometheus label name charset (<c>[a-zA-Z_][a-zA-Z0-9_]*</c>), the same way
+    /// Loki 3.5+ does on ingestion: older Loki versions store invalid names as-is and then fail every query on the stream.
     /// </summary>
     internal sealed class PropertyNameBuilder : IDisposable
     {
         private const string _separator = "__";
         private const string _null = "<null>";
+        private const string _digitPrefix = "key_";
 
         private char[] _buffer;
 
@@ -29,6 +32,12 @@ namespace Serilog.Sinks.Loki.Internal
         public void Reset(string name)
         {
             Length = 0;
+
+            if (name.Length > 0 && IsAsciiDigit(name[0]))
+            {
+                Append(_digitPrefix.AsSpan());
+            }
+
             Append(name.AsSpan());
         }
 
@@ -42,8 +51,10 @@ namespace Serilog.Sinks.Loki.Internal
         public void Append(ReadOnlySpan<char> value)
         {
             EnsureCapacity(value.Length);
+            var start = Length;
             value.CopyTo(_buffer.AsSpan(Length));
             Length += value.Length;
+            Sanitize(start);
         }
 
         public void Append(int value)
@@ -81,13 +92,47 @@ namespace Serilog.Sinks.Loki.Internal
                     {
                         Grow(_buffer.Length * 2);
                     }
+                    var start = Length;
                     Length += charsWritten;
+                    Sanitize(start);
                     break;
 #endif
                 default:
                     Append((key.Value.ToString() ?? _null).AsSpan());
                     break;
             }
+        }
+
+        private static bool IsAsciiDigit(char c) => c >= '0' && c <= '9';
+
+        private static bool IsValidNameChar(char c) => (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || IsAsciiDigit(c) || c == '_';
+
+        /// <summary>
+        /// Replaces every invalid character (a surrogate pair counts as one) from <paramref name="start"/> with '_'.
+        /// </summary>
+        private void Sanitize(int start)
+        {
+            var write = start;
+
+            for (int read = start; read < Length; read++, write++)
+            {
+                var c = _buffer[read];
+
+                if (IsValidNameChar(c))
+                {
+                    _buffer[write] = c;
+                    continue;
+                }
+
+                if (char.IsHighSurrogate(c) && read + 1 < Length && char.IsLowSurrogate(_buffer[read + 1]))
+                {
+                    read++;
+                }
+
+                _buffer[write] = '_';
+            }
+
+            Length = write;
         }
 
         private void EnsureCapacity(int sizeHint)
