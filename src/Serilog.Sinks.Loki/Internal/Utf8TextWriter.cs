@@ -1,7 +1,6 @@
 ﻿// This file is part of the project licensed under the MIT License.
 // See the LICENSE file in the project root for more information.
 
-
 using System.Buffers.Text;
 using System.Text;
 
@@ -11,7 +10,7 @@ namespace Serilog.Sinks.Loki.Internal
     {
         private readonly PooledByteBufferWriter _pooledByteBufferWriter;
 
-        private int _index = 0;
+        private int _index;
 
         private Memory<byte> _buffer;
         public override Encoding Encoding => Encoding.UTF8;
@@ -21,7 +20,6 @@ namespace Serilog.Sinks.Loki.Internal
             _pooledByteBufferWriter = pooledByteBufferWriter;
             _buffer = _pooledByteBufferWriter.GetMemory();
         }
-
 
         private Span<byte> Cursor
         {
@@ -91,7 +89,6 @@ namespace Serilog.Sinks.Loki.Internal
             _index += bytesWritten;
         }
 
-
         public override void Write(float value)
         {
             const int maxLen = 32;
@@ -147,7 +144,6 @@ namespace Serilog.Sinks.Loki.Internal
             Write(Environment.NewLine);
         }
 
-
         public override void Write(string? value)
         {
             if (value is null)
@@ -176,7 +172,7 @@ namespace Serilog.Sinks.Loki.Internal
                 {
                     var maxLen = Encoding.GetByteCount(t, buffer.Length);
                     EnsureCapacity(maxLen);
-                    Span<byte> dest = Cursor.Slice(0, maxLen);
+                    var dest = Cursor.Slice(0, maxLen);
 
                     fixed (byte* d = dest)
                     {
@@ -215,6 +211,7 @@ namespace Serilog.Sinks.Loki.Internal
                 _index = 0;
                 _buffer = default;
             }
+            base.Dispose(disposing);
         }
 
         private void EnsureCapacity(int sizeHint)
@@ -247,14 +244,16 @@ namespace Serilog.Sinks.Loki.Internal
         {
             _pooledByteBufferWriter.Advance(_index);
             _index = 0;
+            _buffer = _pooledByteBufferWriter.GetMemory();
         }
 
         public override void Write(char value)
         {
-            if (value <= byte.MaxValue)
+            // only ASCII maps to a single UTF-8 byte
+            if (value < 0x80)
             {
                 EnsureCapacity(1);
-                Cursor[0] = Convert.ToByte(value);
+                Cursor[0] = (byte)value;
                 _index++;
             }
             else

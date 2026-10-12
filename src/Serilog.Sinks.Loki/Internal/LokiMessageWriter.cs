@@ -1,9 +1,9 @@
 ﻿// This file is part of the project licensed under the MIT License.
 // See the LICENSE file in the project root for more information.
 
-
 using Serilog.Events;
 using System.Buffers.Text;
+using System.Globalization;
 using System.Text.Json;
 
 namespace Serilog.Sinks.Loki.Internal
@@ -28,6 +28,7 @@ namespace Serilog.Sinks.Loki.Internal
         private static readonly JsonEncodedText _critical = JsonEncodedText.Encode("critical");
         private static readonly JsonEncodedText _unknown = JsonEncodedText.Encode("unknown");
         private static readonly JsonEncodedText _type = JsonEncodedText.Encode("type");
+        private static readonly JsonEncodedText _nullValue = JsonEncodedText.Encode("<null>");
 
         private readonly LokiSinkConfigurations _configurations;
         private readonly LokiLogEventComparer _comparer;
@@ -59,9 +60,11 @@ namespace Serilog.Sinks.Loki.Internal
             writer.WritePropertyName(_streams);
             writer.WriteStartArray();
 
+            using var context = new WriteContext();
+
             foreach (var stream in events.GroupBy(x => x, _comparer))
             {
-                WriteStream(writer, stream.Key, stream);
+                WriteStream(writer, stream.Key, stream, context);
             }
 
             writer.WriteEndArray();
@@ -127,135 +130,120 @@ namespace Serilog.Sinks.Loki.Internal
             writer.WriteEndObject();
         }
 
-        private static void WriteLogMessageStringValue(Utf8JsonWriter writer, LogEvent logEvent)
+        private static void WriteLogMessageStringValue(Utf8JsonWriter writer, LogEvent logEvent, Utf8TextWriter messageWriter)
         {
-            using var bf = new PooledByteBufferWriter();
-            using var tw = new Utf8TextWriter(bf);
-            logEvent.RenderMessage(tw);
-            tw.Flush();
-            writer.WriteStringValue(tw.WrittenMemory.Span);
+            messageWriter.Clear();
+            logEvent.RenderMessage(messageWriter, CultureInfo.InvariantCulture);
+            messageWriter.Flush();
+            writer.WriteStringValue(messageWriter.WrittenMemory.Span);
         }
 
-        private static void WriteStructuredValue(Utf8JsonWriter writer, StructureValue structureValue)
+        private static void WriteStructuredValue(PropertyNameBuilder name, Utf8JsonWriter writer, StructureValue structureValue)
         {
-            writer.WriteStartObject();
+            var prefixLength = name.Length;
 
             foreach (var item in structureValue.Properties)
             {
-                writer.WritePropertyName(item.Name);
-                WritePropertyValue(writer, item.Value);
+                name.AppendSeparator();
+                name.Append(item.Name.AsSpan());
+                WriteProperty(name, writer, item.Value);
+                name.Truncate(prefixLength);
             }
-
-            if (structureValue.TypeTag != null)
-                writer.WriteString(_type, structureValue.TypeTag);
-
-            writer.WriteEndObject();
         }
 
-        private static void WriteSequenceValue(Utf8JsonWriter writer, SequenceValue sequence)
+        private static void WriteSequenceValue(PropertyNameBuilder name, Utf8JsonWriter writer, SequenceValue sequence)
         {
-            writer.WriteStartArray();
+            var prefixLength = name.Length;
+            var elements = sequence.Elements;
 
-            foreach (var item in sequence.Elements)
+            for (int i = 0; i < elements.Count; i++)
             {
-                WritePropertyValue(writer, item);
+                name.AppendSeparator();
+                name.Append(i);
+                WriteProperty(name, writer, elements[i]);
+                name.Truncate(prefixLength);
             }
-
-            writer.WriteEndArray();
         }
 
-        private static void WriteDictionaryValue(Utf8JsonWriter writer, DictionaryValue value)
+        private static void WriteDictionaryValue(PropertyNameBuilder name, Utf8JsonWriter writer, DictionaryValue value)
         {
             if (value.Elements is null)
             {
-                writer.WriteNullValue();
+                writer.WritePropertyName(name.Name);
+                writer.WriteStringValue(_nullValue);
                 return;
             }
 
-            writer.WriteStartObject();
+            var prefixLength = name.Length;
 
             foreach (var item in value.Elements)
             {
-                if (item.Key.WriteAsPropertyName(writer))
-                {
-                    WritePropertyValue(writer, item.Value);
-                }
+                name.AppendSeparator();
+                name.Append(item.Key);
+                WriteProperty(name, writer, item.Value);
+                name.Truncate(prefixLength);
             }
-
-            writer.WriteEndObject();
         }
 
-        private static void WritePropertyValue(Utf8JsonWriter writer, LogEventPropertyValue? value)
+        private static void WriteProperty(PropertyNameBuilder name, Utf8JsonWriter writer, LogEventPropertyValue? value)
         {
             switch (value)
             {
                 case null:
-                    writer.WriteNullValue();
+                    writer.WritePropertyName(name.Name);
+                    writer.WriteStringValue(_nullValue);
                     break;
                 case ScalarValue scalarValue:
-                    scalarValue.WriteAsValue(writer);
+                    writer.WritePropertyName(name.Name);
+                    scalarValue.WriteAsNonNullableStringValue(writer);
                     break;
                 case DictionaryValue dictionaryValue:
-                    WriteDictionaryValue(writer, dictionaryValue);
+                    WriteDictionaryValue(name, writer, dictionaryValue);
                     break;
                 case SequenceValue sequenceValue:
-                    WriteSequenceValue(writer, sequenceValue);
+                    WriteSequenceValue(name, writer, sequenceValue);
                     break;
                 case StructureValue structureValue:
-                    WriteStructuredValue(writer, structureValue);
+                    WriteStructuredValue(name, writer, structureValue);
                     break;
                 default:
+                    writer.WritePropertyName(name.Name);
                     writer.WriteStringValue(value.ToString());
                     break;
             }
         }
 
-        private void WriteLogMessageAsJson(Utf8JsonWriter destination, LogEvent logEvent)
+        private void WriteLogMessageAsJson(Utf8JsonWriter destination, LogEvent logEvent, WriteContext context)
         {
-            using var byteBufferWriter = new PooledByteBufferWriter();
-            using var writer = new Utf8JsonWriter(byteBufferWriter);
+            WriteLogMessageStringValue(destination, logEvent, context.MessageWriter);
 
-            writer.WriteStartObject();
-
-            writer.WritePropertyName(_message);
-
-            WriteLogMessageStringValue(writer, logEvent);
-
-            writer.WriteString(_messageTemplate, logEvent.MessageTemplate.Text);
+            destination.WriteStartObject();
 
             if (logEvent.Exception is not null)
             {
-                writer.WritePropertyName(_exception);
-                _exceptionFormatter.Format(writer, logEvent.Exception);
+                _exceptionFormatter.Format(destination, logEvent.Exception);
             }
 
             if (_configurations.EnrichTraceId && logEvent.TraceId.HasValue)
             {
-                writer.WriteString(_traceId, logEvent.TraceId.Value.ToString());
+                destination.WriteString(_traceId, logEvent.TraceId.Value.ToString());
             }
 
             if (_configurations.EnrichSpanId && logEvent.SpanId.HasValue)
             {
-                writer.WriteString(_spanId, logEvent.SpanId.Value.ToString());
+                destination.WriteString(_spanId, logEvent.SpanId.Value.ToString());
             }
 
             foreach (var item in logEvent.Properties)
             {
-                writer.WritePropertyName(item.Key);
-
-                WritePropertyValue(writer, item.Value);
+                context.Name.Reset(item.Key);
+                WriteProperty(context.Name, destination, item.Value);
             }
 
-            writer.WriteEndObject();
-
-            writer.Flush();
-
-            destination.WriteStringValue(byteBufferWriter.WrittenMemory.Span);
+            destination.WriteEndObject();
         }
 
-
-
-        private void WriteLogs(Utf8JsonWriter writer, IEnumerable<LogEvent> events)
+        private void WriteLogs(Utf8JsonWriter writer, IEnumerable<LogEvent> events, WriteContext context)
         {
             writer.WritePropertyName(_values);
 
@@ -273,7 +261,7 @@ namespace Serilog.Sinks.Loki.Internal
 
                 writer.WriteStringValue(buffer.Slice(0, charsWritten));
 
-                WriteLogMessageAsJson(writer, logEvent);
+                WriteLogMessageAsJson(writer, logEvent, context);
 
                 writer.WriteEndArray();
 
@@ -283,15 +271,39 @@ namespace Serilog.Sinks.Loki.Internal
             writer.WriteEndArray();
         }
 
-        private void WriteStream(Utf8JsonWriter writer, LogEvent head, IEnumerable<LogEvent> events)
+        private void WriteStream(Utf8JsonWriter writer, LogEvent head, IEnumerable<LogEvent> events, WriteContext context)
         {
             writer.WriteStartObject();
 
             WriteLabels(writer, head);
 
-            WriteLogs(writer, events);
+            WriteLogs(writer, events, context);
 
             writer.WriteEndObject();
+        }
+
+        /// <summary>
+        /// Scratch buffers shared by all events of a single batch.
+        /// </summary>
+        private sealed class WriteContext : IDisposable
+        {
+            private readonly PooledByteBufferWriter _messageBuffer = new();
+
+            public WriteContext()
+            {
+                MessageWriter = new Utf8TextWriter(_messageBuffer);
+            }
+
+            public Utf8TextWriter MessageWriter { get; }
+
+            public PropertyNameBuilder Name { get; } = new();
+
+            public void Dispose()
+            {
+                MessageWriter.Dispose();
+                _messageBuffer.Dispose();
+                Name.Dispose();
+            }
         }
     }
 }
