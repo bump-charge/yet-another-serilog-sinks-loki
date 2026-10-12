@@ -40,8 +40,8 @@ namespace Serilog.Sinks.Loki.Internal
 
         public void Clear()
         {
+            Buffer.AsSpan(0, WrittenCount).Clear();
             WrittenCount = 0;
-            Buffer.AsSpan().Clear();
         }
 
         public void Dispose()
@@ -85,7 +85,7 @@ namespace Serilog.Sinks.Loki.Internal
 
             byte[] oldBuffer = Buffer;
 
-            var oldBufferSpan = oldBuffer.AsSpan();
+            var oldBufferSpan = oldBuffer.AsSpan(0, WrittenCount);
 
             Buffer = ArrayPool<byte>.Shared.Rent(newSize);
 

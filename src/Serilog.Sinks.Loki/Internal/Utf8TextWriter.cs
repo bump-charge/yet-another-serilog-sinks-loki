@@ -244,14 +244,16 @@ namespace Serilog.Sinks.Loki.Internal
         {
             _pooledByteBufferWriter.Advance(_index);
             _index = 0;
+            _buffer = _pooledByteBufferWriter.GetMemory();
         }
 
         public override void Write(char value)
         {
-            if (value <= byte.MaxValue)
+            // only ASCII maps to a single UTF-8 byte
+            if (value < 0x80)
             {
                 EnsureCapacity(1);
-                Cursor[0] = Convert.ToByte(value);
+                Cursor[0] = (byte)value;
                 _index++;
             }
             else

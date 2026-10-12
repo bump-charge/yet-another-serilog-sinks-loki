@@ -12,6 +12,15 @@ namespace Serilog.Sinks.Loki.Internal
     internal sealed class LokiPushContent : HttpContent
     {
         private static readonly MediaTypeHeaderValue _defaultContentType = new("application/json");
+
+        /// <summary>
+        /// The payload is consumed by Loki, not embedded in HTML: emitting raw UTF-8 instead of
+        /// <c>\uXXXX</c> escapes for non-ASCII and HTML-sensitive characters is faster and smaller.
+        /// </summary>
+        internal static readonly JsonWriterOptions WriterOptions = new()
+        {
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        };
         private readonly LokiMessageWriter _writer;
         private readonly IReadOnlyCollection<LogEvent> _events;
         private LokiPushContent(LokiMessageWriter writer, IReadOnlyCollection<LogEvent> events)
@@ -27,7 +36,7 @@ namespace Serilog.Sinks.Loki.Internal
         protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context)
         {
             using var bufferWriter = new PooledByteBufferWriter(1024 * 4);
-            await using var writer = new Utf8JsonWriter(bufferWriter);
+            await using var writer = new Utf8JsonWriter(bufferWriter, WriterOptions);
 
             _writer.Write(writer, _events);
 

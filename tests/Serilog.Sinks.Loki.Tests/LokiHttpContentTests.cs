@@ -53,5 +53,31 @@ namespace Serilog.Sinks.Loki.Tests
             var r = StringifyJsonPayload(ms);
             await Verify(r);
         }
+
+        [Fact]
+        public async Task ShouldWriteNonAsciiAsRawUtf8()
+        {
+            var logWriter = Create();
+            var log = new LogEvent(_date, LogEventLevel.Information, null, _messageTemplateParser.Parse("Borne {Id} déconnectée <{Status}>"), [
+                new LogEventProperty("Id", new ScalarValue("é-1")),
+                new LogEventProperty("Status", new ScalarValue("hors ligne")),
+            ]);
+
+            using var ms = new MemoryStream();
+            var content = LokiPushContent.Create(logWriter, [log]);
+#pragma warning disable IDE0079
+#pragma warning disable xUnit1051
+            await content.CopyToAsync(ms);
+#pragma warning restore xUnit1051
+#pragma warning restore IDE0079
+            var payload = StringifyJsonPayload(ms);
+
+            Assert.Contains("Borne \\\"é-1\\\" déconnectée <\\\"hors ligne\\\">", payload);
+            Assert.Contains("\"Id\":\"é-1\"", payload);
+
+            using var document = System.Text.Json.JsonDocument.Parse(ms.ToArray());
+            var entry = document.RootElement.GetProperty("streams")[0].GetProperty("values")[0];
+            Assert.Equal("Borne \"é-1\" déconnectée <\"hors ligne\">", entry[1].GetString());
+        }
     }
 }

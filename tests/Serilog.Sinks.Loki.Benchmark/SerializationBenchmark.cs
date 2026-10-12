@@ -20,6 +20,7 @@ namespace Serilog.Sinks.Loki.Benchmark
         private LokiMessageWriter _writer = null!;
         private LogEvent[] _simpleEvents = [];
         private LogEvent[] _complexEvents = [];
+        private LogEvent[] _nonAsciiEvents = [];
 
         private static readonly int _intParam = 1;
         private static readonly string _stringParam = "Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium";
@@ -61,6 +62,14 @@ namespace Serilog.Sinks.Loki.Benchmark
                     "Parametrized {0}; {1}; {2}; {3}; {4}; {5}; {6}; {7}; {8}", propertyValues: _complexParams));
             }
 
+            var nonAscii = new List<LogEvent>();
+            for (int i = 0; i < 200; i++)
+            {
+                nonAscii.Add(logger.Create(LogEventLevel.Information, "Borne {ChargePointId} déconnectée à {Station} : état «{Status}» après échec de la requête",
+                    propertyValues: ["FR*BMP*E1234", "Parking Hôtel de Ville — niveau -2", "Indisponible"]));
+            }
+
+            _nonAsciiEvents = [.. nonAscii];
             _simpleEvents = [.. simple];
             _complexEvents = [.. complex];
 
@@ -88,7 +97,7 @@ namespace Serilog.Sinks.Loki.Benchmark
         public void Serialize_SimpleEvents()
         {
             using var bufferWriter = new PooledByteBufferWriter(1024 * 4);
-            using var jsonWriter = new Utf8JsonWriter(bufferWriter);
+            using var jsonWriter = new Utf8JsonWriter(bufferWriter, LokiPushContent.WriterOptions);
             _writer.Write(jsonWriter, _simpleEvents.AsSpan(0, BatchSize).ToArray());
             jsonWriter.Flush();
         }
@@ -97,8 +106,17 @@ namespace Serilog.Sinks.Loki.Benchmark
         public void Serialize_ComplexEvents()
         {
             using var bufferWriter = new PooledByteBufferWriter(1024 * 4);
-            using var jsonWriter = new Utf8JsonWriter(bufferWriter);
+            using var jsonWriter = new Utf8JsonWriter(bufferWriter, LokiPushContent.WriterOptions);
             _writer.Write(jsonWriter, _complexEvents.AsSpan(0, BatchSize).ToArray());
+            jsonWriter.Flush();
+        }
+
+        [Benchmark]
+        public void Serialize_NonAsciiEvents()
+        {
+            using var bufferWriter = new PooledByteBufferWriter(1024 * 4);
+            using var jsonWriter = new Utf8JsonWriter(bufferWriter, LokiPushContent.WriterOptions);
+            _writer.Write(jsonWriter, _nonAsciiEvents.AsSpan(0, BatchSize).ToArray());
             jsonWriter.Flush();
         }
     }

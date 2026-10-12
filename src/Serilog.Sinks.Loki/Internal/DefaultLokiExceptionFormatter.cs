@@ -42,7 +42,7 @@ namespace Serilog.Sinks.Loki.Internal
                 writer.WritePropertyName(_innerException);
 
                 using var bf = new PooledByteBufferWriter();
-                using var tw = new Utf8JsonWriter(bf);
+                using var tw = new Utf8JsonWriter(bf, LokiPushContent.WriterOptions);
                 tw.WriteStartObject();
                 Format(tw, exception.InnerException);
                 tw.WriteEndObject();

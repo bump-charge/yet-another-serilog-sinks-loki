@@ -103,12 +103,12 @@ namespace Serilog.Sinks.Loki.Internal
                     if (TryFormat(value, span, out int charsWritten))
                     {
                         writer.WriteStringValue(span.Slice(0, charsWritten));
-                        return true;
                     }
                     else
                     {
-                        return false;
+                        writer.WriteStringValue(value.ToString().AsSpan());
                     }
+                    return true;
                 }
                 finally
                 {
@@ -243,7 +243,7 @@ namespace Serilog.Sinks.Loki.Internal
             {
                 return Utf8Formatter.TryFormat(_short, destination, out bytesWritten);
             }
-            else if (value is short _ushort)
+            else if (value is ushort _ushort)
             {
                 return Utf8Formatter.TryFormat(_ushort, destination, out bytesWritten);
             }
@@ -324,7 +324,6 @@ namespace Serilog.Sinks.Loki.Internal
                 DateTime => 36,
                 TimeSpan => 26,
                 Guid => 36,
-                Enum => GetCount(Enum.GetUnderlyingType(value.GetType())),
                 _ => -1
             };
         }

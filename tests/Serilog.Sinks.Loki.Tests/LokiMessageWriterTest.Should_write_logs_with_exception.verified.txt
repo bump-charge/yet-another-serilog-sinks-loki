@@ -14,7 +14,7 @@
             "Exception__Type": "System.InvalidOperationException",
             "Exception__Message": "Message from exception",
             "Exception__StackTrace": "\u003Cnull\u003E",
-            "Exception__InnerException": "{\u0022Exception__Type\u0022:\u0022System.InvalidOperationException\u0022,\u0022Exception__Message\u0022:\u0022Message from inner exception\u0022,\u0022Exception__StackTrace\u0022:\u0022\\u003Cnull\\u003E\u0022}"
+            "Exception__InnerException": "{\u0022Exception__Type\u0022:\u0022System.InvalidOperationException\u0022,\u0022Exception__Message\u0022:\u0022Message from inner exception\u0022,\u0022Exception__StackTrace\u0022:\u0022\u003Cnull\u003E\u0022}"
           }
         ]
       ]
